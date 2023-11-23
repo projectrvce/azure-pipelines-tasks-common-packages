@@ -3,6 +3,20 @@ import * as path from 'path';
 import * as url from 'url';
 
 import * as tl from 'azure-pipelines-task-lib/task';
+import { getSystemAccessToken } from './locationUtilities';
+
+export interface EndpointCredentials {
+    endpoint: string;
+    username?: string;
+    password: string;
+}
+
+export enum PackageToolType {
+    NuGetCommand,
+    DotNetCoreCLI,
+    UniversalPackages,
+    Npm
+}
 
 export function getTempPath(): string {
     const tempNpmrcDir
@@ -100,6 +114,99 @@ export enum LogType {
     debug,
     warning,
     error
+}
+
+export function getAccessToken(nugetFeedType:string, endpointInputKey:string, feedInputKey:string, packageToolType: PackageToolType) : string {
+    let accessToken: string = getSystemAccessToken();
+    if (nugetFeedType.toLowerCase() == "internal") {
+        let feed = getProjectAndFeedIdFromInputParam(feedInputKey);
+        if (isUserAccessTokenRequired(feed.feedId)) {
+            accessToken = getUserAccessToken(tl.getInput(endpointInputKey), packageToolType, feed);
+        }
+    }
+
+    return accessToken;
+}
+
+export function isUserAccessTokenRequired(feedId: any) : boolean {
+    let useUserAccessToken: boolean = false;
+
+    let feeds = tl.getVariable('Packaging.doNotUseSystemAccessTokenFeeds');
+    if (feeds) {
+        tl.debug(`List of Feeds that require user access token - ${feeds}`);
+        let feedList: string[] = JSON.parse(feeds);
+        useUserAccessToken = feedList.some((feedEntry) => { if (feedEntry == feedId) { return true; } });
+    }
+    return useUserAccessToken;
+}
+
+function getUserAccessToken(endpointName: string, packageToolType: PackageToolType, feed: any): string {
+    let token = "";
+    tl.debug("Using the token set by user instead of system access token");
+
+    if(endpointName) {
+        tl.debug(`Using the endpoint ${endpointName} provided by user`);
+        token = getUserAccessTokenFromServiceConnectionForInternalFeeds(endpointName);
+    }
+    else {
+        tl.debug("Using the credential details set in environment");
+        token = getUserAccessTokenFromEnvironmentForInternalFeeds(feed, packageToolType);
+    }
+
+    return token;
+}
+
+function getUserAccessTokenFromServiceConnectionForInternalFeeds(endpointName: string): string {
+    let token: string = "";
+    let auth = tl.getEndpointAuthorization(endpointName, true);
+    let scheme = tl.getEndpointAuthorizationScheme(endpointName, true).toLowerCase();
+    switch(scheme)
+    {
+        case ("token"):
+            token = auth.parameters["apitoken"];
+            break;
+        default:
+            tl.warning("Invalid authentication type for internal feed. Use token based authentication.");
+            break;
+    }
+
+    return token;
+}
+
+function getUserAccessTokenFromEnvironmentForInternalFeeds(feed: any, packageToolType: PackageToolType) : string {
+    let token: string = "";
+
+    switch(packageToolType)
+    {
+        case PackageToolType.NuGetCommand:
+        case PackageToolType.DotNetCoreCLI:
+            const JsonEndpointsString = process.env["VSS_NUGET_EXTERNAL_FEED_ENDPOINTS"];
+            if (JsonEndpointsString) {
+                tl.debug(`Endpoints found: ${JsonEndpointsString}`);
+
+                let endpointsArray: { endpointCredentials: EndpointCredentials[] } = JSON.parse(JsonEndpointsString);
+                tl.debug(`Feed details ${feed.feedId} ${feed.projectId}`);
+
+                for (let endpoint_in = 0; endpoint_in < endpointsArray.endpointCredentials.length; endpoint_in++) {
+                    if (endpointsArray.endpointCredentials[endpoint_in].endpoint.search(feed.feedId) != -1) {
+                        tl.debug(`Endpoint Credentials found for ${feed.feedId}`);
+                        token = endpointsArray.endpointCredentials[endpoint_in].password;
+                        break;
+                    }
+                }
+            }
+            break;
+        case PackageToolType.UniversalPackages:
+            token = process.env["UNIVERSAL_PUBLISH_PAT"];
+            break;
+        case PackageToolType.Npm:
+            token = process.env["NPM_PUBLISH_TOKEN"];
+            break;
+        default:
+            tl.warning("PackageToolType not supported");
+    }
+
+    return token;
 }
 
 function log(message: string, logType: LogType) {
