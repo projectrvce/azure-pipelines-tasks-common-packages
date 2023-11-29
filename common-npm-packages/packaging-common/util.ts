@@ -5,7 +5,12 @@ import * as url from 'url';
 import * as tl from 'azure-pipelines-task-lib/task';
 import { getSystemAccessToken } from './locationUtilities';
 
-export interface EndpointCredentials {
+export interface FeedDetails {
+    id : string;
+    name : string;
+}
+
+interface EndpointCredentials {
     endpoint: string;
     username?: string;
     password: string;
@@ -134,8 +139,8 @@ export function isUserAccessTokenRequired(feedId: any) : boolean {
     let feeds = tl.getVariable('Packaging.doNotUseSystemAccessTokenFeeds');
     if (feeds) {
         tl.debug(`List of Feeds that require user access token - ${feeds}`);
-        let feedList: string[] = JSON.parse(feeds);
-        useUserAccessToken = feedList.some((feedEntry) => { if (feedEntry == feedId) { return true; } });
+        let feedList: FeedDetails[] = JSON.parse(feeds);
+        useUserAccessToken = feedList.some((feedDetail) => { return (feedDetail.id == feedId || feedDetail.name == feedId); });
     }
     return useUserAccessToken;
 }
