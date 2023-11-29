@@ -5,7 +5,7 @@ import * as url from 'url';
 import * as tl from 'azure-pipelines-task-lib/task';
 import { getSystemAccessToken } from './locationUtilities';
 
-export interface FeedDetails {
+interface FeedDetails {
     id : string;
     name : string;
 }
