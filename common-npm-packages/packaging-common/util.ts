@@ -190,7 +190,7 @@ function getAccessTokenFromEnvironmentForInternalFeeds(feed: any, packageToolTyp
             token = process.env["UNIVERSAL_PUBLISH_PAT"];
             break;
         default:
-            tl.warning("PackageToolType not supported");
+            tl.warning("PackageToolType not supported to get token from environment");
     }
 
     return token;
