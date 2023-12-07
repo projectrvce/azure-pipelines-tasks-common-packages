@@ -5,11 +5,6 @@ import * as url from 'url';
 import * as tl from 'azure-pipelines-task-lib/task';
 import { getSystemAccessToken } from './locationUtilities';
 
-interface FeedDetails {
-    id : string;
-    name : string;
-}
-
 interface EndpointCredentials {
     endpoint: string;
     username?: string;
@@ -125,43 +120,33 @@ export function getAccessToken(nugetFeedType:string, endpointInputKey:string, fe
     let accessToken: string = getSystemAccessToken();
     if (nugetFeedType.toLowerCase() == "internal") {
         let feed = getProjectAndFeedIdFromInputParam(feedInputKey);
-        if (isUserAccessTokenRequired(feed.feedId)) {
-            accessToken = getUserAccessToken(tl.getInput(endpointInputKey), packageToolType, feed);
-        }
+        accessToken = getUserAccessToken(tl.getInput(endpointInputKey), packageToolType, feed);
     }
 
+    if (!accessToken) {
+        tl.debug(`Access token not set. Using System Access token.`);
+        return getSystemAccessToken();
+    }
     return accessToken;
-}
-
-export function isUserAccessTokenRequired(feedId: any) : boolean {
-    let useUserAccessToken: boolean = false;
-
-    let feeds = tl.getVariable('Packaging.doNotUseSystemAccessTokenFeeds');
-    if (feeds) {
-        tl.debug(`List of Feeds that require user access token - ${feeds}`);
-        let feedList: FeedDetails[] = JSON.parse(feeds);
-        useUserAccessToken = feedList.some((feedDetail) => { return (feedDetail.id == feedId || feedDetail.name == feedId); });
-    }
-    return useUserAccessToken;
 }
 
 function getUserAccessToken(endpointName: string, packageToolType: PackageToolType, feed: any): string {
     let token = "";
-    tl.debug("Using the token set by user instead of system access token");
+    tl.debug("Checking if the token is already set.");
 
     if(endpointName) {
-        tl.debug(`Using the endpoint ${endpointName} provided by user`);
-        token = getUserAccessTokenFromServiceConnectionForInternalFeeds(endpointName);
+        tl.debug(`Checking if the endpoint ${endpointName} provided by user, can be used.`);
+        token = getAccessTokenFromServiceConnectionForInternalFeeds(endpointName);
     }
     else {
-        tl.debug("Using the credential details set in environment");
-        token = getUserAccessTokenFromEnvironmentForInternalFeeds(feed, packageToolType);
+        tl.debug("Checking if the credentials are set in the environment.");
+        token = getAccessTokenFromEnvironmentForInternalFeeds(feed, packageToolType);
     }
 
     return token;
 }
 
-function getUserAccessTokenFromServiceConnectionForInternalFeeds(endpointName: string): string {
+function getAccessTokenFromServiceConnectionForInternalFeeds(endpointName: string): string {
     let token: string = "";
     let auth = tl.getEndpointAuthorization(endpointName, true);
     let scheme = tl.getEndpointAuthorizationScheme(endpointName, true).toLowerCase();
@@ -178,7 +163,7 @@ function getUserAccessTokenFromServiceConnectionForInternalFeeds(endpointName: s
     return token;
 }
 
-function getUserAccessTokenFromEnvironmentForInternalFeeds(feed: any, packageToolType: PackageToolType) : string {
+function getAccessTokenFromEnvironmentForInternalFeeds(feed: any, packageToolType: PackageToolType) : string {
     let token: string = "";
 
     switch(packageToolType)
@@ -203,9 +188,6 @@ function getUserAccessTokenFromEnvironmentForInternalFeeds(feed: any, packageToo
             break;
         case PackageToolType.UniversalPackages:
             token = process.env["UNIVERSAL_PUBLISH_PAT"];
-            break;
-        case PackageToolType.Npm:
-            token = process.env["NPM_PUBLISH_TOKEN"];
             break;
         default:
             tl.warning("PackageToolType not supported");
