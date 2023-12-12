@@ -3,6 +3,20 @@ import * as path from 'path';
 import * as url from 'url';
 
 import * as tl from 'azure-pipelines-task-lib/task';
+import { getSystemAccessToken } from './locationUtilities';
+
+interface EndpointCredentials {
+    endpoint: string;
+    username?: string;
+    password: string;
+}
+
+export enum PackageToolType {
+    NuGetCommand,
+    DotNetCoreCLI,
+    UniversalPackages,
+    Npm
+}
 
 export function getTempPath(): string {
     const tempNpmrcDir
@@ -100,6 +114,86 @@ export enum LogType {
     debug,
     warning,
     error
+}
+
+export function getAccessToken(nugetFeedType:string, endpointInputKey:string, feedInputKey:string, packageToolType: PackageToolType) : string {
+    let accessToken: string = getSystemAccessToken();
+    if (nugetFeedType.toLowerCase() == "internal") {
+        let feed = getProjectAndFeedIdFromInputParam(feedInputKey);
+        accessToken = getUserAccessToken(tl.getInput(endpointInputKey), packageToolType, feed);
+    }
+
+    if (!accessToken) {
+        tl.debug(`Access token not set. Using System Access token.`);
+        return getSystemAccessToken();
+    }
+    return accessToken;
+}
+
+function getUserAccessToken(endpointName: string, packageToolType: PackageToolType, feed: any): string {
+    let token = "";
+    tl.debug("Checking if the token is already set.");
+
+    if(endpointName) {
+        tl.debug(`Checking if the endpoint ${endpointName} provided by user, can be used.`);
+        token = getAccessTokenFromServiceConnectionForInternalFeeds(endpointName);
+    }
+    else {
+        tl.debug("Checking if the credentials are set in the environment.");
+        token = getAccessTokenFromEnvironmentForInternalFeeds(feed, packageToolType);
+    }
+
+    return token;
+}
+
+function getAccessTokenFromServiceConnectionForInternalFeeds(endpointName: string): string {
+    let token: string = "";
+    let auth = tl.getEndpointAuthorization(endpointName, true);
+    let scheme = tl.getEndpointAuthorizationScheme(endpointName, true).toLowerCase();
+    switch(scheme)
+    {
+        case ("token"):
+            token = auth.parameters["apitoken"];
+            break;
+        default:
+            tl.warning("Invalid authentication type for internal feed. Use token based authentication.");
+            break;
+    }
+
+    return token;
+}
+
+function getAccessTokenFromEnvironmentForInternalFeeds(feed: any, packageToolType: PackageToolType) : string {
+    let token: string = "";
+
+    switch(packageToolType)
+    {
+        case PackageToolType.NuGetCommand:
+        case PackageToolType.DotNetCoreCLI:
+            const JsonEndpointsString = process.env["VSS_NUGET_EXTERNAL_FEED_ENDPOINTS"];
+            if (JsonEndpointsString) {
+                tl.debug(`Endpoints found: ${JsonEndpointsString}`);
+
+                let endpointsArray: { endpointCredentials: EndpointCredentials[] } = JSON.parse(JsonEndpointsString);
+                tl.debug(`Feed details ${feed.feedId} ${feed.projectId}`);
+
+                for (let endpoint_in = 0; endpoint_in < endpointsArray.endpointCredentials.length; endpoint_in++) {
+                    if (endpointsArray.endpointCredentials[endpoint_in].endpoint.search(feed.feedId) != -1) {
+                        tl.debug(`Endpoint Credentials found for ${feed.feedId}`);
+                        token = endpointsArray.endpointCredentials[endpoint_in].password;
+                        break;
+                    }
+                }
+            }
+            break;
+        case PackageToolType.UniversalPackages:
+            token = process.env["UNIVERSAL_PUBLISH_PAT"];
+            break;
+        default:
+            tl.warning("PackageToolType not supported to get token from environment");
+    }
+
+    return token;
 }
 
 function log(message: string, logType: LogType) {
